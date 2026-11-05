@@ -1,0 +1,57 @@
+name: Windows Desktop - Clean Unedited Screenshot
+on:
+  push:
+    branches: [planet-vikler-hd-remaster]
+    paths: [.github/workflows/windows-clean-desktop.yml]
+  workflow_dispatch:
+
+jobs:
+  screenshot:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture clean actual Windows desktop with game and terminals minimized
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          try {
+            $shell = New-Object -ComObject Shell.Application
+            $shell.MinimizeAll()
+          } catch {
+            Write-Host "Shell.MinimizeAll failed, trying keyboard Win+D"
+            Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public class WinKey {
+            [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, int flags, int extra);
+          }
+          '@
+            [WinKey]::keybd_event(0x5B,0,0,0)
+            [WinKey]::keybd_event(0x44,0,0,0)
+            [WinKey]::keybd_event(0x44,0,2,0)
+            [WinKey]::keybd_event(0x5B,0,2,0)
+          }
+          Start-Sleep -Seconds 3
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+          $bounds = $screen.Bounds
+          Write-Host ("Primary screen: {0}x{1}, origin {2},{3}" -f $bounds.Width,$bounds.Height,$bounds.X,$bounds.Y)
+          $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          try {
+            $g.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bounds.Size, [System.Drawing.CopyPixelOperation]::SourceCopy)
+            $bmp.Save((Join-Path (Get-Location) "WINDOWS_CLEAN_DESKTOP_REAL.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+          } finally {
+            $g.Dispose(); $bmp.Dispose()
+          }
+          $desktopPath = [Environment]::GetFolderPath("Desktop")
+          Write-Host "Desktop folder: $desktopPath"
+          Get-ChildItem -Path $desktopPath -ErrorAction SilentlyContinue | Select-Object Name,Length | Format-Table
+          Get-Item WINDOWS_CLEAN_DESKTOP_REAL.png | Select-Object FullName,Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Clean-Desktop-Screenshot
+          path: WINDOWS_CLEAN_DESKTOP_REAL.png
+          retention-days: 7
