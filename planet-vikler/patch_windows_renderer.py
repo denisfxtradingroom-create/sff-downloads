@@ -6,7 +6,7 @@ src=Path("WindowsEngine/SpaceCadetPinball/render.cpp")
 s=src.read_text()
 assert "void render::PresentVScreen()" in s
 assert "#include \"winmain.h\"" in s
-s=s.replace('#include "winmain.h"','#include "winmain.h"\n#include "pinball.h"',1)
+s=s.replace('#include "winmain.h"','#include "winmain.h"\n#include "pb.h"',1)
 s=s.replace('void render::PresentVScreen()', '''// Lazy-loaded additive RGBA light layer. Never touches native ball/collision state.
 static SDL_Texture* planetHdGlow = nullptr;
 static bool planetHdAttempted = false;
@@ -19,7 +19,7 @@ anchor='''\tif (options::Options.DebugOverlay)
 assert anchor in s
 code='''    if (!planetHdAttempted) {
         planetHdAttempted=true;
-        auto surface=SDL_LoadBMP(pinball::make_path_name("HD_GLOW.BMP").c_str());
+        auto surface=SDL_LoadBMP(pb::make_path_name("HD_GLOW.BMP").c_str());
         if (surface) {
             planetHdGlow=SDL_CreateTextureFromSurface(winmain::Renderer,surface);
             SDL_FreeSurface(surface);
