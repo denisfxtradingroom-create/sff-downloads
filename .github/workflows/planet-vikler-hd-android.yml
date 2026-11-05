@@ -1,0 +1,87 @@
+name: Planet Vikler HD Remaster Android
+on:
+  push:
+    branches: [planet-vikler-hd-remaster]
+  workflow_dispatch:
+
+jobs:
+  android:
+    name: Native Android HD Remaster
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-33" "build-tools;33.0.2" "cmake;3.22.1" "ndk;25.2.9519653"
+      - name: Clone same native source as stable offline game
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch android --recurse-submodules --shallow-submodules https://github.com/fexed/Pinball-on-Android.git port
+          git clone --depth=1 https://github.com/andrewnakas/open-cadet.git open-cadet
+          test -f port/SpaceCadetPinball/TEdgeManager.cpp
+          test -s open-cadet/PINBALL.DAT
+      - name: Prepare original audio and exact-geometry HD graphics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install Pillow
+          python3 planet-vikler/prepare_hd_remaster.py
+          test -s port/app/src/main/assets/HD_GLOW.BMP
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,zipfile
+          o=Path("open-cadet/PINBALL.DAT").read_bytes()
+          n=Path("port/app/src/main/assets/PINBALL.DAT").read_bytes()
+          assert len(o)==len(n)
+          p=80708
+          assert o[:p]==n[:p] and o[p+1024:]==n[p+1024:]
+          assert hashlib.sha256(o).digest()!=hashlib.sha256(n).digest()
+          assert len(list(Path("port/app/src/main/assets").glob("SOUND*.WAV")))>=60
+          assert Path("port/app/src/main/assets/PINBALL.mp3").stat().st_size>10_000_000
+          print("VERIFIED: 100% non-palette DAT bytes unchanged, audio intact.")
+          PY
+      - name: Compile native SDL pinball engine and Android UI
+        shell: bash
+        run: |
+          chmod +x port/gradlew
+          cd port
+          ./gradlew --no-daemon :app:assembleDebug --stacktrace
+      - name: Verify APK structure, offline permission, art and native libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import zipfile,shutil
+          src="port/app/build/outputs/apk/debug/app-debug.apk"
+          with zipfile.ZipFile(src) as z:
+              names=set(z.namelist())
+              assert z.testzip() is None
+              assert "assets/PINBALL.DAT" in names
+              assert "assets/HD_GLOW.BMP" in names
+              assert "assets/PINBALL.mp3" in names
+              assert sum(x.startswith("assets/SOUND") and x.endswith(".WAV") for x in names)>=60
+              assert any(x.endswith("/libSpaceCadetPinball.so") for x in names)
+              assert any(x.endswith("/libSDL2.so") for x in names)
+              print("APK VALID / ASSETS:",len(names))
+          shutil.copy2(src,"PLANET_VIKLER_HD_REMASTER_ANDROID.apk")
+          PY
+          "$ANDROID_SDK_ROOT/build-tools/33.0.2/aapt" dump badging PLANET_VIKLER_HD_REMASTER_ANDROID.apk > apk_badging.txt
+          head -6 apk_badging.txt
+          ! "$ANDROID_SDK_ROOT/build-tools/33.0.2/aapt" dump permissions PLANET_VIKLER_HD_REMASTER_ANDROID.apk | grep -q 'android.permission.INTERNET'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Planet-Vikler-HD-Android
+          path: |
+            PLANET_VIKLER_HD_REMASTER_ANDROID.apk
+            planet-vikler-hd-alignment.png
+          retention-days: 30
