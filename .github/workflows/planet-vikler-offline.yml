@@ -31,6 +31,10 @@ jobs:
           test -f port/SpaceCadetPinball/winmain.cpp
           test -f port/app/src/main/cpp/SDL/CMakeLists.txt
           test -s open-cadet/PINBALL.DAT
+      - name: Install offline audio encoder
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
       - name: Remove proprietary bundled assets and assemble original CC0 replacement game
         run: |
           python3 planet-vikler/prepare_offline.py
