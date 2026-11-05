@@ -1,0 +1,75 @@
+name: Planet Vikler HD Android Emulator Screenshots
+on:
+  push:
+    branches: [planet-vikler-hd-remaster]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Planet-Vikler-HD-Android
+          run-id: 42024045419
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify prebuilt native APK
+        run: |
+          ls -lah PLANET_VIKLER_HD_REMASTER_ANDROID.apk
+          test -s PLANET_VIKLER_HD_REMASTER_ANDROID.apk
+      - name: Start Android emulator, install and play
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          disable-animations: true
+          emulator-options: -no-snapshot -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            set -euo pipefail
+            adb install -r PLANET_VIKLER_HD_REMASTER_ANDROID.apk
+            adb shell am start -n com.planetvikler.hdremaster/com.fexed.spacecadetpinball.PremiumLauncher
+            sleep 8
+            adb shell screencap -p /sdcard/vikler_menu.png
+            adb pull /sdcard/vikler_menu.png HD_EMULATOR_MENU.png
+            adb shell uiautomator dump /sdcard/ui.xml >/dev/null
+            adb pull /sdcard/ui.xml ui.xml >/dev/null
+            python3 - <<'PY'
+            import re,subprocess,xml.etree.ElementTree as ET
+            root=ET.parse('ui.xml').getroot()
+            for node in root.iter('node'):
+                if 'IGRAJ' in node.attrib.get('text',''):
+                    numbers=list(map(int,re.findall(r'\d+',node.attrib['bounds'])))
+                    assert len(numbers)==4
+                    x=(numbers[0]+numbers[2])//2
+                    y=(numbers[1]+numbers[3])//2
+                    print('Tap actual Play button at',x,y)
+                    subprocess.run(['adb','shell','input','tap',str(x),str(y)],check=True)
+                    break
+            else: raise RuntimeError('No interactive IGRAJ control found')
+            PY
+            sleep 12
+            adb shell screencap -p /sdcard/vikler_game.png
+            adb pull /sdcard/vikler_game.png HD_EMULATOR_GAME.png
+            adb shell pidof com.planetvikler.hdremaster || true
+            adb logcat -d -v brief -s AndroidRuntime:E SDL:E > hd_android_errors.log
+            if grep -q 'FATAL EXCEPTION' hd_android_errors.log; then cat hd_android_errors.log; exit 1; fi
+            python3 - <<'PY'
+            from PIL import Image
+            for f in ['HD_EMULATOR_MENU.png','HD_EMULATOR_GAME.png']:
+                im=Image.open(f)
+                assert min(im.size)>400
+                print(f,im.size)
+            PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Planet-Vikler-HD-Emulator-Validation
+          path: |
+            HD_EMULATOR_MENU.png
+            HD_EMULATOR_GAME.png
+            hd_android_errors.log
+          retention-days: 30
