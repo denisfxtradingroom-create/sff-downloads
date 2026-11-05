@@ -67,7 +67,8 @@ jobs:
             print("OFFLINE native APK OK, file count:",len(names))
           shutil.copy(p,"Planet_Vikler_NATIVE_OFFLINE_Android.apk")
           PY
-          "$ANDROID_SDK_ROOT/build-tools/33.0.2/aapt" dump badging Planet_Vikler_NATIVE_OFFLINE_Android.apk | head -6
+          "$ANDROID_SDK_ROOT/build-tools/33.0.2/aapt" dump badging Planet_Vikler_NATIVE_OFFLINE_Android.apk > apk_badging.txt
+          head -6 apk_badging.txt
           ! "$ANDROID_SDK_ROOT/build-tools/33.0.2/aapt" dump permissions Planet_Vikler_NATIVE_OFFLINE_Android.apk | grep -q android.permission.INTERNET
       - uses: actions/upload-artifact@v4
         with:
