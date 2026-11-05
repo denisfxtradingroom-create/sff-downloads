@@ -34,7 +34,30 @@ jobs:
             [WinKey]::keybd_event(0x44,0,2,0)
             [WinKey]::keybd_event(0x5B,0,2,0)
           }
-          Start-Sleep -Seconds 3
+          # Dismiss a startup Windows Server paging file message if present.
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class WindowsPopup {
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+            public static extern IntPtr FindWindow(string cls, string title);
+            [DllImport("user32.dll")]
+            public static extern bool PostMessage(IntPtr hwnd,uint msg,IntPtr w,IntPtr l);
+          }
+          '@
+          foreach($attempt in 1..6) {
+            $popup=[WindowsPopup]::FindWindow($null,"System Properties")
+            if($popup -ne [IntPtr]::Zero) {
+              Write-Host "Dismissed startup System Properties dialog"
+              [void][WindowsPopup]::PostMessage($popup,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)
+            }
+            Start-Sleep -Milliseconds 500
+          }
+          try { $shell.MinimizeAll() } catch {}
+          Start-Sleep -Seconds 2
+          if ([WindowsPopup]::FindWindow($null,"System Properties") -ne [IntPtr]::Zero) {
+            throw "Cannot capture a clean desktop while a system popup is visible."
+          }
           $screen = [System.Windows.Forms.Screen]::PrimaryScreen
           $bounds = $screen.Bounds
           Write-Host ("Primary screen: {0}x{1}, origin {2},{3}" -f $bounds.Width,$bounds.Height,$bounds.X,$bounds.Y)
