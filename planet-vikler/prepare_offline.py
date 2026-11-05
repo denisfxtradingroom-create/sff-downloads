@@ -79,7 +79,9 @@ s=s.replace("runOnUiThread(() -> firebaseAnalytics.logEvent(FirebaseAnalytics.Ev
 s=s.replace("runOnUiThread(() -> firebaseAnalytics.logEvent(FirebaseAnalytics.Event.LEVEL_END, null));","")
 s=s.replace("bndl.putInt(FirebaseAnalytics.Param.SCORE, score);","")
 s=s.replace("runOnUiThread(() -> firebaseAnalytics.logEvent(FirebaseAnalytics.Event.POST_SCORE, bndl));","")
-assert "FirebaseAnalytics" not in s
+# Upstream also logs cheat usage and session totals; keep everything local.
+s=re.sub(r"(?m)^.*firebaseAnalytics\\.logEvent\\(.*;\\s*$","",s)
+assert "firebaseAnalytics" not in s and "FirebaseAnalytics" not in s
 java.write_text(s)
 # Keep high scores local, do not submit player data to the upstream scoreboard.
 rank=root/"app/src/main/java/com/fexed/spacecadetpinball/HighScoreHandler.java"
