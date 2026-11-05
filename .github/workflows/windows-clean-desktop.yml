@@ -53,6 +53,24 @@ jobs:
             }
             Start-Sleep -Milliseconds 500
           }
+          # The modal warning can belong to the Windows runner's shell host
+          # rather than the process executing this workflow. Try regular OS
+          # dismissal as well as enumeration of window-bearing processes.
+          Get-Process | Where-Object { $_.MainWindowTitle } |
+            Select-Object ProcessName,Id,MainWindowTitle | Format-Table -AutoSize
+          try {
+            [Microsoft.VisualBasic.Interaction]::AppActivate("System Properties")
+            [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+            Start-Sleep -Milliseconds 800
+          } catch {
+            Write-Host "No foreground System Properties alert accessible via AppActivate"
+          }
+          Get-Process | Where-Object { $_.MainWindowTitle -eq "System Properties" } |
+            ForEach-Object {
+              Write-Host "Closing OS system properties popup process $($_.Id)"
+              $_.CloseMainWindow() | Out-Null
+            }
+          Start-Sleep -Milliseconds 600
           try { $shell.MinimizeAll() } catch {}
           Start-Sleep -Seconds 2
           if ([WindowsPopup]::FindWindow($null,"System Properties") -ne [IntPtr]::Zero) {
