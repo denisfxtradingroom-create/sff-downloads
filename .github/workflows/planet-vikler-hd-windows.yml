@@ -1,0 +1,86 @@
+name: Planet Vikler HD Remaster Windows PC
+on:
+  push:
+    branches: [planet-vikler-hd-remaster]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up .NET desktop launcher
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Clone native Windows engine and art sources
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch master https://github.com/k4zmu2a/SpaceCadetPinball.git WindowsEngine
+          git clone --depth 1 --branch android https://github.com/fexed/Pinball-on-Android.git port
+          git clone --depth 1 https://github.com/andrewnakas/open-cadet.git open-cadet
+          New-Item -ItemType Directory -Force original-midi | Out-Null
+          Copy-Item port/app/src/main/assets/PINBALL.MID original-midi/PINBALL.MID
+          Copy-Item port/app/src/main/assets/PINBALL2.MID original-midi/PINBALL2.MID
+      - name: Obtain SDL2 Windows development libraries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference="Stop"
+          Invoke-WebRequest -Uri "https://github.com/libsdl-org/SDL/releases/download/release-2.30.12/SDL2-devel-2.30.12-VC.zip" -OutFile sdl.zip
+          Invoke-WebRequest -Uri "https://github.com/libsdl-org/SDL_mixer/releases/download/release-2.8.1/SDL2_mixer-devel-2.8.1-VC.zip" -OutFile mix.zip
+          Expand-Archive sdl.zip -DestinationPath sdlout
+          Expand-Archive mix.zip -DestinationPath mixout
+          New-Item -ItemType Directory -Force WindowsEngine/Libs | Out-Null
+          Move-Item sdlout/SDL2-2.30.12 WindowsEngine/Libs/SDL2
+          Move-Item mixout/SDL2_mixer-2.8.1 WindowsEngine/Libs/SDL2_mixer
+          if (!(Test-Path WindowsEngine/Libs/SDL2/lib/x64/SDL2.lib)) { throw "SDL2 lib missing" }
+          if (!(Test-Path WindowsEngine/Libs/SDL2_mixer/lib/x64/SDL2_mixer.lib)) { throw "Mixer lib missing" }
+      - name: Prepare HD art identical to Android
+        shell: pwsh
+        run: |
+          python -m pip install Pillow
+          python planet-vikler/prepare_hd_remaster.py
+          if ($LASTEXITCODE -ne 0) { throw "HD assets failed" }
+          python planet-vikler/patch_windows_renderer.py
+          if ($LASTEXITCODE -ne 0) { throw "Windows renderer patch failed" }
+      - name: Build native Windows game
+        shell: pwsh
+        run: |
+          cmake -S WindowsEngine -B WindowsEngine/build -A x64
+          if ($LASTEXITCODE -ne 0) { throw "CMake setup failed" }
+          cmake --build WindowsEngine/build --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "Native compiler failed" }
+          if (!(Test-Path WindowsEngine/bin/Release/SpaceCadetPinball.exe)) { throw "Game EXE missing" }
+      - name: Build standalone Windows HD launcher
+        shell: pwsh
+        run: |
+          dotnet publish planet-vikler/windows-launcher/PlanetViklerLauncher.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true --output LauncherPublished
+          if ($LASTEXITCODE -ne 0) { throw "Launcher failed" }
+          if (!(Test-Path LauncherPublished/PlanetViklerLauncher.exe)) { throw "Launcher EXE missing" }
+      - name: Package offline Windows HD Edition
+        shell: pwsh
+        run: |
+          $ErrorActionPreference="Stop"
+          New-Item -ItemType Directory -Force Planet_Vikler_HD_Windows | Out-Null
+          Copy-Item WindowsEngine/bin/Release/SpaceCadetPinball.exe Planet_Vikler_HD_Windows/
+          Copy-Item WindowsEngine/bin/Release/*.dll Planet_Vikler_HD_Windows/ -ErrorAction SilentlyContinue
+          Copy-Item WindowsEngine/Libs/SDL2/lib/x64/*.dll Planet_Vikler_HD_Windows/
+          Copy-Item WindowsEngine/Libs/SDL2_mixer/lib/x64/*.dll Planet_Vikler_HD_Windows/
+          Copy-Item LauncherPublished/PlanetViklerLauncher.exe Planet_Vikler_HD_Windows/
+          Copy-Item port/app/src/main/assets/*.WAV Planet_Vikler_HD_Windows/
+          Copy-Item port/app/src/main/assets/PINBALL.DAT Planet_Vikler_HD_Windows/
+          Copy-Item port/app/src/main/assets/HD_GLOW.BMP Planet_Vikler_HD_Windows/
+          Copy-Item original-midi/* Planet_Vikler_HD_Windows/
+          $readme="PLANET VIKLER HD REMASTER 2026" + [Environment]::NewLine + "Pokreni PlanetViklerLauncher.exe. Fizika, sudari i putanje lopte nisu menjani."
+          Set-Content -Path Planet_Vikler_HD_Windows/README.txt -Value $readme
+          if ((Get-ChildItem Planet_Vikler_HD_Windows/*.WAV).Count -lt 60) { throw "WAV missing" }
+          if (!(Test-Path Planet_Vikler_HD_Windows/SDL2.dll)) { throw "SDL2 DLL missing" }
+          if (!(Test-Path Planet_Vikler_HD_Windows/SDL2_mixer.dll)) { throw "SDL2 mixer DLL missing" }
+          Compress-Archive -Path Planet_Vikler_HD_Windows -DestinationPath PLANET_VIKLER_HD_REMASTER_WINDOWS_PC.zip
+          Get-Item PLANET_VIKLER_HD_REMASTER_WINDOWS_PC.zip | Select-Object Name,Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Planet-Vikler-HD-Windows-PC
+          path: PLANET_VIKLER_HD_REMASTER_WINDOWS_PC.zip
+          retention-days: 30
