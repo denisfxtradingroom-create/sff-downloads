@@ -2,7 +2,7 @@
 """Add the same Planet Vikler HD SDL light pass to the Windows native engine."""
 from pathlib import Path
 import shutil
-src=Path("SpaceCadetPinball/SpaceCadetPinball/render.cpp")
+src=Path("WindowsEngine/SpaceCadetPinball/render.cpp")
 s=src.read_text()
 assert "void render::PresentVScreen()" in s
 assert "#include \"winmain.h\"" in s
