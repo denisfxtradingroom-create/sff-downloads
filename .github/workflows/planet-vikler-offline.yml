@@ -1,0 +1,72 @@
+name: Planet Vikler native offline Android APK
+on:
+  push:
+    branches: [planet-vikler-offline-android-native]
+  workflow_dispatch:
+
+jobs:
+  native-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+      - name: Android SDK with SDL2 NDK toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-33" "build-tools;33.0.2" "cmake;3.22.1" "ndk;25.2.9519653"
+      - name: Clone upstream native MIT Space Cadet Android engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch android --recurse-submodules --shallow-submodules https://github.com/fexed/Pinball-on-Android.git port
+          git clone --depth=1 https://github.com/andrewnakas/open-cadet.git open-cadet
+          test -f port/SpaceCadetPinball/winmain.cpp
+          test -f port/app/src/main/cpp/SDL/CMakeLists.txt
+          test -s open-cadet/PINBALL.DAT
+      - name: Remove proprietary bundled assets and assemble original CC0 replacement game
+        run: |
+          python3 planet-vikler/prepare_offline.py
+          test ! -e port/app/src/main/assets/FONT.DAT
+          test ! -e port/app/src/main/assets/table.bmp
+          test ! -e port/app/src/main/assets/PINBALL.MID
+          test ! -e port/app/src/main/assets/PINBALL2.MID
+          find port/app/src/main/assets -maxdepth 1 -type f | sort
+      - name: Build native Android APK
+        shell: bash
+        run: |
+          chmod +x port/gradlew
+          cd port
+          ./gradlew --no-daemon :app:assembleDebug --stacktrace
+      - name: Verify standalone offline native game package
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import zipfile,shutil
+          p="port/app/build/outputs/apk/debug/app-debug.apk"
+          with zipfile.ZipFile(p) as z:
+            names=set(z.namelist())
+            assert z.testzip() is None
+            assert "assets/PINBALL.DAT" in names
+            assert len([x for x in names if x.startswith("assets/SOUND") and x.endswith(".WAV")])>=40
+            assert "assets/PINBALL.mp3" in names
+            assert any(x.endswith("/libSpaceCadetPinball.so") for x in names)
+            assert any(x.endswith("/libSDL2.so") for x in names)
+            assert "assets/table.bmp" not in names
+            print("OFFLINE native APK OK, file count:",len(names))
+          shutil.copy(p,"Planet_Vikler_NATIVE_OFFLINE_Android.apk")
+          PY
+          "$ANDROID_SDK_ROOT/build-tools/33.0.2/aapt" dump badging Planet_Vikler_NATIVE_OFFLINE_Android.apk | head -6
+          ! "$ANDROID_SDK_ROOT/build-tools/33.0.2/aapt" dump permissions Planet_Vikler_NATIVE_OFFLINE_Android.apk | grep -q android.permission.INTERNET
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Planet-Vikler-Native-Offline-Android
+          path: Planet_Vikler_NATIVE_OFFLINE_Android.apk
+          retention-days: 30
