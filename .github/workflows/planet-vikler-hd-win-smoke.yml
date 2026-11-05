@@ -1,0 +1,49 @@
+name: Planet Vikler HD Windows Native Runtime Screenshot
+on:
+  push:
+    branches: [planet-vikler-hd-remaster]
+  workflow_dispatch:
+
+jobs:
+  desktop-test:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Planet-Vikler-HD-Windows-PC
+          run-id: 42025765480
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract built native game and launcher
+        shell: pwsh
+        run: |
+          Expand-Archive PLANET_VIKLER_HD_REMASTER_WINDOWS_PC.zip -DestinationPath WinSmoke
+          if (!(Test-Path WinSmoke/Planet_Vikler_HD_Windows/SpaceCadetPinball.exe)) { throw "Native game missing" }
+          if (!(Test-Path WinSmoke/Planet_Vikler_HD_Windows/HD_GLOW.BMP)) { throw "Light layer missing" }
+      - name: Launch real native Windows game and capture desktop
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $dir=(Resolve-Path WinSmoke/Planet_Vikler_HD_Windows).Path
+          $exe=Join-Path $dir "SpaceCadetPinball.exe"
+          $p=Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru
+          Start-Sleep -Seconds 10
+          $p.Refresh()
+          if ($p.HasExited) { throw "Native Windows process exited before gameplay screenshot. Exit code: $($p.ExitCode)" }
+          $screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bitmap=New-Object System.Drawing.Bitmap($screen.Width,$screen.Height)
+          $graphics=[System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.CopyFromScreen(0,0,0,0,$screen.Size)
+          $bitmap.Save("PLANET_VIKLER_WINDOWS_NATIVE_REAL.png",[System.Drawing.Imaging.ImageFormat]::Png)
+          $graphics.Dispose()
+          $bitmap.Dispose()
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "Captured actual running native Windows game at $($screen.Width)x$($screen.Height)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Planet-Vikler-Windows-Runtime-Capture
+          path: PLANET_VIKLER_WINDOWS_NATIVE_REAL.png
+          retention-days: 30
