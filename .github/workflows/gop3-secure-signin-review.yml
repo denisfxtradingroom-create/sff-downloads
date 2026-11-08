@@ -1,0 +1,110 @@
+name: GOP3 - Windows YouTube review (secret-based sign-in)
+on:
+  workflow_dispatch:
+  push:
+    branches: [gada-poker-windows]
+    paths:
+      - .github/workflows/gop3-secure-signin-review.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-youtube:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check encrypted credentials are configured
+        id: check
+        shell: pwsh
+        env:
+          GOP3_USER: ${{ secrets.GOP3_GOOGLE_EMAIL }}
+          GOP3_PASS: ${{ secrets.GOP3_GOOGLE_PASSWORD }}
+        run: |
+          New-Item -ItemType Directory -Force -Path video-review | Out-Null
+          if ([string]::IsNullOrWhiteSpace($env:GOP3_USER) -or [string]::IsNullOrWhiteSpace($env:GOP3_PASS)) {
+            'not_configured' | Set-Content -Encoding UTF8 video-review/status.txt
+            Write-Host "::notice::Configure GOP3_GOOGLE_EMAIL and GOP3_GOOGLE_PASSWORD as repository Actions secrets. Never paste them in workflow code."
+            "has_secrets=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            "has_secrets=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: Install browser automation
+        if: steps.check.outputs.has_secrets == 'true'
+        shell: pwsh
+        run: python -m pip install playwright
+
+      - name: Try Google login in Windows Chrome and inspect GOP3 YouTube video
+        if: steps.check.outputs.has_secrets == 'true'
+        shell: pwsh
+        env:
+          GOP3_USER: ${{ secrets.GOP3_GOOGLE_EMAIL }}
+          GOP3_PASS: ${{ secrets.GOP3_GOOGLE_PASSWORD }}
+        run: |
+          @'
+          import os, asyncio, json
+          from pathlib import Path
+          from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+
+          TARGET = "https://www.youtube.com/watch?v=Mb-f1NLv1EM"
+          OUT = Path("video-review")
+          OUT.mkdir(exist_ok=True)
+          def save(status, extra=None):
+              (OUT/"status.json").write_text(json.dumps({"status": status, **(extra or {})}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+          async def main():
+              async with async_playwright() as p:
+                  browser = await p.chromium.launch(channel="chrome", headless=True)
+                  ctx = await browser.new_context(viewport={"width":1280, "height":720}, locale="en-US")
+                  page = await ctx.new_page()
+                  try:
+                      await page.goto("https://accounts.google.com/ServiceLogin?service=youtube", wait_until="domcontentloaded", timeout=45000)
+                      await page.locator("#identifierId").fill(os.environ["GOP3_USER"], timeout=15000)
+                      await page.locator("#identifierNext").click(timeout=15000)
+                      await page.locator('input[type="password"]').wait_for(timeout=20000)
+                      await page.locator('input[type="password"]').fill(os.environ["GOP3_PASS"])
+                      await page.locator("#passwordNext").click(timeout=15000)
+                      await page.wait_for_timeout(8000)
+                      if "accounts.google.com" in page.url:
+                          save("google_requires_interactive_verification")
+                          return
+                      await page.goto(TARGET, wait_until="domcontentloaded", timeout=45000)
+                      await page.wait_for_timeout(5000)
+                      try:
+                          await page.locator(".ytp-large-play-button").first.click(timeout=3000)
+                      except Exception:
+                          pass
+                      await page.wait_for_timeout(10000)
+                      data = await page.evaluate("""() => {
+                        const v = document.querySelector('video');
+                        return v ? {currentTime:v.currentTime,duration:v.duration,readyState:v.readyState,paused:v.paused,width:v.videoWidth,height:v.videoHeight,error: v.error?.message || null} : null;
+                      }""")
+                      if data and data.get("width", 0) > 0 and data.get("currentTime", 0) > 0:
+                          save("video_playback_confirmed", {"video": data})
+                          await page.screenshot(path=str(OUT/"youtube_video_01.png"))
+                          await page.wait_for_timeout(3500)
+                          await page.screenshot(path=str(OUT/"youtube_video_02.png"))
+                      else:
+                          save("video_not_playing", {"video": data})
+                  except PlaywrightTimeoutError:
+                      save("login_or_video_timed_out")
+                  except Exception as exc:
+                      save("browser_error", {"type": type(exc).__name__})
+                  finally:
+                      await ctx.close()
+                      await browser.close()
+          asyncio.run(main())
+          '@ | Set-Content -Encoding UTF8 -Path secure_inspect.py
+          python secure_inspect.py
+
+      - name: Upload video-only review artifacts (no cookies or credentials)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gop3-windows-secure-youtube-review
+          path: video-review/
+          if-no-files-found: warn
+          retention-days: 1
