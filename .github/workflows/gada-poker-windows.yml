@@ -1,0 +1,88 @@
+name: GADA Poker - Windows Godot 3.6.3
+on:
+  push:
+    branches: [gada-poker-windows]
+    paths:
+      - .github/workflows/gada-poker-windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-godot:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm real Windows runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture | Format-List
+          Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model,TotalPhysicalMemory | Format-List
+          Write-Host ("RUNNER_OS=" + $env:RUNNER_OS)
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'Expected Windows runner' }
+
+      - name: Download official Godot 3.6.3 Win64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/godotengine/godot/releases/download/3.6.3-stable/Godot_v3.6.3-stable_win64.exe.zip'
+          $zip = Join-Path $env:RUNNER_TEMP 'godot363.zip'
+          $dest = Join-Path $env:RUNNER_TEMP 'godot363'
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          $exe = Get-ChildItem -Path $dest -Recurse -File -Filter '*.exe' |
+            Where-Object { $_.Name -match 'Godot' } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exe) { throw 'Godot Windows exe missing in official release archive' }
+          $version = & $exe --version
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch '^3\.6\.3') { throw "Wrong Godot version: $version" }
+          Write-Host "Windows Godot version: $version"
+          "GODOT_PATH=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Native Windows Godot project smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = Join-Path $env:RUNNER_TEMP 'gada-windows-smoke'
+          New-Item -ItemType Directory -Force -Path $project | Out-Null
+          @'
+          config_version=4
+
+          [application]
+          config/name="GADA Poker Windows QA"
+          run/main_scene="res://main.tscn"
+
+          [rendering]
+          quality/driver/driver_name="GLES2"
+          '@ | Set-Content -Encoding UTF8 (Join-Path $project 'project.godot')
+          @'
+          extends SceneTree
+          func _init():
+              print("GADA_WINDOWS_GODOT363_SMOKE_PASS")
+              quit(0)
+          '@ | Set-Content -Encoding UTF8 (Join-Path $project 'smoke.gd')
+          & $env:GODOT_PATH --no-window --path $project -s res://smoke.gd
+          if ($LASTEXITCODE -ne 0) { throw "Godot Windows smoke failed: $LASTEXITCODE" }
+          Write-Host 'GADA_WINDOWS_GODOT363_SMOKE_PASS'
+
+      - name: Save Windows QA report
+        if: always()
+        shell: pwsh
+        run: |
+          $report = @(
+            ('runner_os=' + $env:RUNNER_OS)
+            ('windows_version=' + [Environment]::OSVersion.VersionString)
+            'godot_version=3.6.3'
+            ('commit=' + $env:GITHUB_SHA)
+          ) -join "`n"
+          $report | Set-Content -Encoding UTF8 windows-qa.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gada-windows-godot363-qa
+          path: windows-qa.txt
