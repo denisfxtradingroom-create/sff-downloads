@@ -1,0 +1,51 @@
+name: Inspect user video on Windows
+on:
+  push:
+    branches: [gada-poker-windows]
+    paths:
+      - .github/workflows/inspect-user-video.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install video downloader
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade "yt-dlp[default,curl-cffi]"
+      - name: Download exact YouTube Short for visual examination
+        id: download
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path 'video-review' | Out-Null
+          $url = 'https://www.youtube.com/watch?v=zuuEQqSuYBY'
+          python -m yt_dlp --no-playlist --socket-timeout 20 --retries 1 --extractor-retries 1 --js-runtimes node -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b" --merge-output-format mp4 -o "video-review/original.%(ext)s" $url 2>&1 | Tee-Object -FilePath 'video-review/download.log'
+          $files = Get-ChildItem video-review -File | Where-Object {$_.Extension -in '.mp4','.webm','.mkv'}
+          if (-not $files) {throw 'No video file downloaded'}
+          Write-Host 'VIDEO_DOWNLOADED=YES'
+          Get-ChildItem video-review -File | Format-Table Name,Length
+      - name: Extract still frames and metadata
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $video = (Get-ChildItem video-review -File | Where-Object {$_.Extension -in '.mp4','.webm','.mkv'} | Select-Object -First 1).FullName
+          ffprobe -v error -show_entries format=duration,format_name,size -of default=noprint_wrappers=1 $video | Out-File -Encoding utf8 video-review/metadata.txt
+          ffmpeg -hide_banner -nostdin -v error -i $video -vf "fps=1/2,scale=640:-1" -frames:v 24 video-review/frame_%03d.jpg
+      - name: Upload retrieved video and frames for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-shorts-review-zuuEQqSuYBY
+          path: video-review/
+          if-no-files-found: warn
+          retention-days: 1
